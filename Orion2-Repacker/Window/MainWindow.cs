@@ -270,29 +270,11 @@ namespace Orion.Window
 
         private void OnDoubleClickNode(object sender, TreeNodeMouseClickEventArgs e)
         {
+            // TreeView에서 TreeItem을 더블 클릭했을 때, 하위 자식이 있을 경우 하위 자식들을 리스트에 추가한다
             PackNode pNode = pTreeView.SelectedNode as PackNode;
-            if (pNode == null || pNode.Nodes.Count != 0)
-                return;
-            object pObj = pNode.Tag;
 
-            if (pObj is PackNodeList)
-            {
-                PackNodeList pList = pObj as PackNodeList;
+            ExpandNodeList(pNode, true);
 
-                // Iterate all further directories within the list
-                foreach (KeyValuePair<string, PackNodeList> pChild in pList.Children)
-                {
-                    pNode.Nodes.Add(new PackNode(pChild.Value, pChild.Key));
-                }
-
-                // Iterate entries
-                foreach (PackFileEntry pEntry in pList.Entries.Values)
-                {
-                    pNode.Nodes.Add(new PackNode(pEntry, pEntry.TreeName));
-                }
-
-                pNode.Expand();
-            }
             /*else if (pObj is PackFileEntry)
             {
                 PackFileEntry pEntry = pObj as PackFileEntry;
@@ -317,41 +299,95 @@ namespace Orion.Window
             this.pTreeView.ExpandAll();
         }
 
+        private void ExpandNodeList(PackNode pNode, bool expand = false)
+        {
+            if (pNode != null && pNode.Tag is PackNodeList)
+            {
+                if (pNode.Nodes.Count == 0) //안펼쳐져있다면 하위 노드들을 생성한다
+                {
+                    PackNodeList pList = pNode.Tag as PackNodeList;
+
+                    foreach (KeyValuePair<string, PackNodeList> pChild in pList.Children)
+                    {
+                        pNode.Nodes.Add(new PackNode(pChild.Value, pChild.Key));
+                    }
+                    foreach (PackFileEntry pEntry in pList.Entries.Values)
+                    {
+                        pNode.Nodes.Add(new PackNode(pEntry, pEntry.TreeName));
+                    }
+
+                    if (expand)
+                        pNode.Expand();
+                    else pNode.Collapse();
+                }
+            }
+        }
+        
+        //재귀함수
+        private void RecursiveExport ( PackNode node)
+        {
+            if ( node.Tag is PackNodeList )
+            {
+                PackNodeList list = node.Tag as PackNodeList;
+
+                // 펼쳐 있든 아니든 일단 펼쳐 본다. 
+                ExpandNodeList(node, false);
+
+                var childNode = node.FirstNode;
+                while(childNode != null )
+                {
+                    RecursiveExport(childNode as PackNode); 
+                    childNode = childNode.NextNode;
+                }
+                
+            }
+            else if ( node.Tag is PackFileEntry )
+            {
+                ExportItem(node);
+            }
+        }
+
+        // 선택한 최하위 아이템(자식이 없는 PackNode)을 export 한다.
         private void OnExport(object sender, EventArgs e)
         {
             PackNode pNode = this.pTreeView.SelectedNode as PackNode;
+            if (pNode == null)
+                return;
 
-            if (pNode != null)
+            RecursiveExport(pNode);
+        }
+
+        private void ExportItem(PackNode pNode)
+        {
+            // pNode가 null이면 아무짓 안한다
+            if (pNode == null)
+                return;
+
+            PackFileEntry pEntry = pNode.Tag as PackFileEntry;
+
+            // pNode가 파일이 아니거나 데이터가 없으면 아무짓도 안한다
+            if (pEntry == null)
+                return;
+
+            // 데이터가 없으면 데이터를 채워넣는다
+            if (pNode.Data == null)
             {
-                byte[] pData = pNode.Data;
+                // Data를 채울 수 있는지 확인 해보자. 채울 수 없으면 리턴!
+                PackFileHeaderVerBase pFileHeader = pEntry.FileHeader;
+                if (pFileHeader != null)
+                    pNode.Data = CryptoMan.DecryptData(pFileHeader, pDataMappedMemFile);
 
-                if (pData != null)
-                {
-                    PackFileEntry pEntry = pNode.Tag as PackFileEntry;
-                    if (pEntry != null)
-                    {
-                        string sName = pEntry.TreeName.Split('.')[0];
-                        string sExtension = pEntry.TreeName.Split('.')[1];
-
-                        SaveFileDialog pDialog = new SaveFileDialog
-                        {
-                            Title = "Select the destination to export the file",
-                            FileName = sName,
-                            Filter = string.Format("{0} File|*.{1}", sExtension.ToUpper(), sExtension)
-                        };
-
-                        if (pDialog.ShowDialog() == DialogResult.OK)
-                        {
-                            File.WriteAllBytes(pDialog.FileName, pData);
-
-                            NotifyMessage(string.Format("Successfully exported to {0}", pDialog.FileName), MessageBoxIcon.Information);
-                        }
-                    }
-                }
-            } else
-            {
-                NotifyMessage("Please select a file to export.", MessageBoxIcon.Asterisk);
+                // 데이터 채우기 했는데도 널이면 리턴
+                if (pNode.Data == null) return;
             }
+
+            // 디렉토리의 위치
+            string path = pNode.FullPath.Substring(0, pNode.FullPath.LastIndexOf('\\'));
+            DirectoryInfo directory = new DirectoryInfo(path);
+            if (!directory.Exists)  //디렉토리가 없으면 만든다
+                directory.Create();
+
+            File.WriteAllBytes(pNode.FullPath, pEntry.Data);
         }
 
         private void OnLoadFile(object sender, EventArgs e)
@@ -786,6 +822,8 @@ namespace Orion.Window
                     {
                         if (pNode.Data == null)
                         {
+                            // PackFileEntry에 Data에 데이터를 넣는 부분 
+                            //실제 데이터는 그 파일을 선택할때 들어감
                             // TODO: Improve memory efficiency here and dispose of the data if
                             // it's unchanged once they select a different node in the tree.
                             pNode.Data = CryptoMan.DecryptData(pFileHeader, this.pDataMappedMemFile);
