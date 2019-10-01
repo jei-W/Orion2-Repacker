@@ -345,6 +345,15 @@ namespace Orion.Window
             {
                 ExportItem(node);
             }
+            else if (node.Tag is PackStreamVer1)
+            {
+                var childNode = node.FirstNode;
+                while (childNode != null)
+                {
+                    RecursiveExport(childNode as PackNode);
+                    childNode = childNode.NextNode;
+                }
+            }
         }
 
         // 선택한 최하위 아이템(자식이 없는 PackNode)을 export 한다.
